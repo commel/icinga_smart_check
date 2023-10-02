@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+import argparse
+import subprocess
+import io
+import json
+import math
+from enum import IntEnum
+
+class IcingaState(IntEnum):
+    OK = 0
+    WARNING = 1
+    CRITICAL = 2
+    UNKNOWN = 3
+
+CHECK_NAME = "smart"
+
+CRIT_FIELDS = ["Raw_Read_Error_Rate"]
+WARN_FIELDS = ["Read_Soft_Error_Rate", "Reported_Uncorrect", "Hardware_ECC_Recovered", "Current_Pending_Sector", "UDMA_CRC_Error_Count"]
+
+
+def run(args):
+    result = dict()
+    raw_result_smart = subprocess.Popen(["/usr/sbin/smartctl", "-j", "-x", args.device], stdout=subprocess.PIPE)
+    result_smart = json.loads(raw_result_smart.stdout.read())
+
+    result["attribs"] = dict()
+
+    if ("device" in result_smart):
+        result["device"] = result_smart["device"]["name"]
+        result["model"]  = result_smart["model_name"]
+        result["size_gb"] = math.ceil(int(result_smart["user_capacity"]["bytes"]) / 1000 / 1000 / 1000)
+        result["status"] = "PASSED" if result_smart["smart_status"]["passed"] else "NOT PASSED"
+        result["temperature"] = dict()
+        result["temperature"]["current"] = result_smart["temperature"]["current"]
+        result["temperature"]["max"] = ""
+        for entry in result_smart["ata_smart_attributes"]["table"]:
+            if (entry["name"] in (CRIT_FIELDS + WARN_FIELDS)):
+                result["attribs"][entry["name"]] = int(entry["raw"]["value"])
+    else:
+        print("device %s not found" % (args.device))
+        exit(-1)
+
+    generate_icinga_response(result, args)
+
+def generate_icinga_response(result: dict, args):
+    icinga_state: IcingaState = IcingaState.UNKNOWN
+
+    if (not "device" in result):
+        icinga_state = IcingaState.CRITICAL
+    else:
+        icinga_state = IcingaState.OK
+
+        for field in result["attribs"]:
+            value = result["attribs"][field]
+
+            # no need to look further, cannot escalate more
+            if icinga_state == IcingaState.CRITICAL:
+                break
+
+            old_state = icinga_state
+
+            if value >= args.read_error_crit:
+                icinga_state = IcingaState.CRITICAL
+            elif value >= args.read_error_warn:
+                icinga_state = IcingaState.WARNING
+            elif value == 0:
+                icinga_state = IcingaState.OK
+
+            # do not decrease the state
+            if old_state > icinga_state:
+                icinga_state = old_state
+
+        if result["temperature"]["current"] >= args.temperature_crit:
+            temp_icinga_state = IcingaState.CRITICAL
+        elif result["temperature"]["current"] >= args.temperature_warn:
+            temp_icinga_state = IcingaState.WARNING
+        else:
+            temp_icinga_state = IcingaState.OK
+
+        # do not decrease the state
+        if temp_icinga_state > icinga_state:
+            icinga_state = temp_icinga_state
+
+    attribs = " ".join(["%s=%s" % (r, result["attribs"][r]) for r in result["attribs"]])
+
+    print("%s %s: %s, %s, %sGB | status=%s %s temperature=%s;;;;%s" % (CHECK_NAME, icinga_state.name, result["device"], result["model"], result["size_gb"], result["status"], attribs, result["temperature"]["current"], result["temperature"]["max"]))
+    exit(icinga_state.value)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog="check_smart", description="Checker Plugin for SMART")
+    parser.add_argument("-device", type=str, default="/dev/sda")
+    parser.add_argument("-read_error_warn", type=int, default=10000)
+    parser.add_argument("-read_error_crit", type=int, default=100000)
+    parser.add_argument("-temperature_warn", type=int, default=50)
+    parser.add_argument("-temperature_crit", type=int, default=70)
+    args = parser.parse_args()
+
+    run(args)
