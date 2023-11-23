@@ -9,6 +9,11 @@ This check only requires Python 3.6 (openSUSE Leap 15.4 based) and smartctl. Pla
 
 * -read_error_warn triggers warning if errors exceed value
 * -read_error_crit triggers critical if errors exceed value
+* -temperature_warn warning if temperature exceeds value
+* -temperature_crit critical if temperature exceeds value
+* -value-fmt formatting raw-values from vendor specific values
+  (e.g. ```1,raw48:54``` formats field 1)
+* -debug True activates debugging mode
 
 ## Installation
 Place the check_smart2 somewhere where Icinga can access it (e.g. /usr/local/bin). Then append the

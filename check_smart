@@ -15,12 +15,21 @@ class IcingaState(IntEnum):
 CHECK_NAME = "smart"
 
 CRIT_FIELDS = ["Raw_Read_Error_Rate"]
-WARN_FIELDS = ["Read_Soft_Error_Rate", "Reported_Uncorrect", "Hardware_ECC_Recovered", "Current_Pending_Sector", "UDMA_CRC_Error_Count"]
-
+WARN_FIELDS = ["Read_Soft_Error_Rate", "Reported_Uncorrect", "Current_Pending_Sector", "UDMA_CRC_Error_Count"]
 
 def run(args):
     result = dict()
-    raw_result_smart = subprocess.Popen(["/usr/sbin/smartctl", "-j", "-x", args.device], stdout=subprocess.PIPE)
+    # smart raw value formatting depending on vendor specs
+    if len(args.value_fmt) > 0:
+        formatting = [f"-v {r}" for r in args.value_fmt.split(" ")]
+    else:
+        formatting = [""]
+
+    command = ["/usr/sbin/smartctl", "-j", "-x", *formatting, args.device]
+    if args.debug:
+        print(command)
+    
+    raw_result_smart = subprocess.Popen(command, stdout=subprocess.PIPE)
     result_smart = json.loads(raw_result_smart.stdout.read())
 
     result["attribs"] = dict()
@@ -93,6 +102,9 @@ if __name__ == "__main__":
     parser.add_argument("-read_error_crit", type=int, default=100000)
     parser.add_argument("-temperature_warn", type=int, default=50)
     parser.add_argument("-temperature_crit", type=int, default=70)
+    parser.add_argument("-value-fmt", type=str, default="1,raw48 7,raw48")
+    parser.add_argument("-debug", type=bool, default=False)
+   
     args = parser.parse_args()
 
     run(args)
